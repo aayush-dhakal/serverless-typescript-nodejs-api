@@ -1,0 +1,101 @@
+service: notes-api
+frameworkVersion: "2"
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  lambdaHashingVersion: 20201221
+  # stage: dev
+  stage: ${opt:stage, 'dev'} # getting stage value from command line prop stage(in command line: sls deploy --stage dev). If we don't pass any stage value then 'dev' will be default
+  region: us-east-1
+  # environment variables provided in here will be accessible in all lambda functions
+  # environment:
+  #   some_env: some_value
+
+plugins:
+  - serverless-iam-roles-per-function
+  - serverless-plugin-typescript
+
+functions:
+  authorizer:
+    handler: authorizer.handler
+    environment:
+      COGNITO_USERPOOL_ID: !Ref cognitoUserPool
+      COGNITO_WEB_CLIENT_ID: !Ref cognitoUserPoolWebclient
+
+  createNote:
+    handler: handler.createNote
+    environment:
+      NOTES_TABLE_NAME: !Ref notesTable # defining environment variable for notes table name
+      AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1 # Reusing Connections with Keep-Alive in Node.js. This will reuse the previous handshake made during connecting the server for subsequent requests
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource: !GetAtt notesTable.Arn
+    events:
+      - http:
+          method: post
+          path: notes
+          authorizer: authorizer
+
+  updateNote:
+    handler: handler.updateNote
+    environment:
+      NOTES_TABLE_NAME: !Ref notesTable
+      AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+        Resource: !GetAtt notesTable.Arn
+    events:
+      - http:
+          method: put
+          path: notes/{id}
+          authorizer: authorizer
+
+  deleteNote:
+    handler: handler.deleteNote
+    environment:
+      NOTES_TABLE_NAME: !Ref notesTable
+      AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:DeleteItem
+        Resource: !GetAtt notesTable.Arn
+    events:
+      - http:
+          method: delete
+          path: notes/{id}
+          authorizer: authorizer
+
+  getAllNotes:
+    handler: handler.getAllNotes
+    environment:
+      NOTES_TABLE_NAME: !Ref notesTable
+      AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Scan
+        Resource: !GetAtt notesTable.Arn
+    events:
+      - http:
+          method: get
+          path: notes
+          authorizer: authorizer
+          # example of userpool cognito authorizer
+          # authorizer:
+          #   name: userpool_authorizer
+          #   arn: arn:aws:cognito-idp:us-east-1:535662744569:userpool/us-east-1_ozutoh1LS  # hard coded userpool arn
+          # or
+          #   name: userpool_authorizer
+          #   type: COGNITO_USER_POOLS
+          #   arn: !GetAtt cognitoUserPool.Arn
+          #   arn: ${ssm:/notes/${self:provider.stage}/userPoolId} # or get the arn from stored AWS SSM(Systems Manager Agent) variable
+
+# you can add CloudFormation resource templates here
+resources:
+  Resources: ${file(resources.yml)}

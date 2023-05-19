@@ -1,0 +1,105 @@
+# Notes dynamodb table
+notesTable:
+  Type: AWS::DynamoDB::Table
+  Properties:
+    TableName: notes-${self:provider.stage} # ${self:provider.stage} gives the stage name, by default it is 'dev'
+    BillingMode: PAY_PER_REQUEST
+    AttributeDefinitions:
+      - AttributeName: notesId
+        AttributeType: S
+    KeySchema:
+      - AttributeName: notesId # specifies the primary key
+        KeyType: HASH
+
+# Cognito user pool
+cognitoUserPool:
+  Type: AWS::Cognito::UserPool
+  Properties:
+    UserPoolName: MyNotesUP-${self:provider.stage}
+
+# User pool web client
+cognitoUserPoolWebclient:
+  Type: AWS::Cognito::UserPoolClient
+  Properties:
+    UserPoolId: !Ref cognitoUserPool
+    ClientName: web
+    AllowedOAuthFlowsUserPoolClient: true
+    SupportedIdentityProviders:
+      - COGNITO
+    AllowedOAuthScopes:
+      - phone
+      - email
+      - profile
+      - openid
+    AllowedOAuthFlows:
+      - implicit
+    ExplicitAuthFlows:
+      - ALLOW_ADMIN_USER_PASSWORD_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      - ALLOW_CUSTOM_AUTH
+      - ALLOW_USER_SRP_AUTH # required for test function
+    CallbackURLs:
+      - http://localhost:3000
+
+# User pool domain
+cognitoUserPoolDoamin:
+  Type: AWS::Cognito::UserPoolDomain
+  Properties:
+    UserPoolId: !Ref cognitoUserPool
+    Domain: mynotescd234-${self:provider.stage}
+
+# Application parameters
+# way to store some variable value in aws.(not required in this project)
+userPoolIdParam:
+  Type: AWS::SSM::Parameter
+  Properties:
+    Name: /notes/${self:provider.stage}/userPoolId
+    Type: String
+    Value: !GetAtt cognitoUserPool.Arn
+
+# cache policy for cloud front
+restAPICachePolicy:
+  Type: AWS::CloudFront::CachePolicy
+  Properties:
+    CachePolicyConfig:
+      DefaultTTL: 300 # 300 seconds ie 5 minutes for cache time to leave(ie remove cache after 5 minutes)
+      MaxTTL: 31536000 # 1 year
+      MinTTL: 60 # 1 minute
+      Name: RestAPICachePolicy
+      ParametersInCacheKeyAndForwardedToOrigin:
+        CookiesConfig:
+          CookieBehavior: none
+        EnableAcceptEncodingBrotli: true
+        EnableAcceptEncodingGzip: true
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers:
+            - Authorization # we will make cache according to the Authorization token so by this their will be different cache for different user
+        QueryStringsConfig:
+          QueryStringBehavior: none
+
+# cloudfront distribution
+cloudFrontDistribution:
+  Type: AWS::CloudFront::Distribution
+  Properties:
+    DistributionConfig:
+      Enabled: true
+      DefaultCacheBehavior:
+        TargetOriginId: restAPIOrigin
+        CachePolicyId: !Ref restAPICachePolicy
+        ViewerProtocolPolicy: https-only
+      CacheBehaviors: # this is for custom cache behaviour
+        - PathPattern: /dev/* # - is used to define array
+          TargetOriginId: restAPIOrigin
+          CachePolicyId: !Ref restAPICachePolicy
+          ViewerProtocolPolicy: https-only
+      Origins:
+        - Id: restAPIOrigin
+          DomainName: !Join # the url that is used to invoke the restapi
+            - "." # joins below attributes with dot(.)
+            - - !Ref ApiGatewayRestApi # gives unique id
+              - "execute-api"
+              - ${aws:region}
+              - "amazonaws.com"
+          CustomOriginConfig:
+            OriginProtocolPolicy: https-only

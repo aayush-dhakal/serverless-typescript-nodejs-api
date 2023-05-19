@@ -1,0 +1,4 @@
+node_modules
+.serverless
+my-artifact/notes-api.zip
+.env
